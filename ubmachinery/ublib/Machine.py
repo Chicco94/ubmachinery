@@ -10,72 +10,54 @@ from threading import Thread
 import datetime 
 import time
 
-# per connessione con database
-from ublib.sql_connection import *
-
-# per connessione tramite TCP-IP/Ethernet
-import socket
-
-# per connessione con modbus
-# from ublib.plc_connection import plc_connect, plc_disconnect
-
-# per connessione con modbus
-from ublib.modbus_connection import modbus_connect, modbus_disconnect, read, write
-
-# per connessione opc-ua
-from opcua import ua
-from opcua import Client
-from opcua.common import ua_utils
-
-from random import random, randint
-
-
-SLEEP_TIME = 5.000
 
 class Machine(Thread):
 	''' Classe che estende i thread che rappresenta una macchina
 	'''
-	def __init__(self, _config, _client = None, _db_conn = None):
+	def __init__(self, _id, _db_conn = None, config_connessione='',config_commesse='', config_analisi='', config_dati='', sleep_time=5.0):
 		''' configurazione macchina
 			client se già connessa (la macchina ha un metodo connect())
 			db_conn se già connesso
 		'''
 		Thread.__init__(self)
-		self.id			= _config['db_config']['idMacchinario']
-		self.client	 	= _client
-		self.config	 	= _config
+		self.id			= _id
 		self.db_conn	= _db_conn
 		self.connected 	= False
+		self.config_connessione = config_connessione
+		self.config_commesse = config_commesse
+		self.config_analisi = config_analisi
+		self.config_dati = config_dati
+		self.sleep_time = sleep_time
 
 	def run(self):
 		'''funzione necessaria ai thread per funzionare'''
-		self.start_connector(interval = SLEEP_TIME)
+		self.start_connector(sleep_time = self.sleep_time)
 
-	def start_connector(self, stop=False, interval = 1):
+	def start_connector(self, stop=False, sleep_time = 1):
 		''' Avvia la connessione con la macchina e cicla finchè necessario
 			quando termina il ciclo, disconnette la macchina
 		'''
 		self.connect()
-		self.cycle(stop, interval)
+		self.cycle(stop, sleep_time)
 		self.disconnect()
 
-	def cycle(self, stop=False, interval = 1, sleep_time = 5):
+	def cycle(self, stop=False, sleep_time = 5):
 		commessa_attiva = {'co_id':None}
-		machine_data = None
+		machine_data = {}
 		# ciclo finchè non mi viene detto di fermarmi
 		while (not stop):
 			
 			if (not self.connected):
 				print("macchina {} non connessa".format(self.id))
 				# riprovo a connettermi al macchinario
-				time.sleep(interval)
+				time.sleep(sleep_time)
 				self.connect()
 				continue
 
 			# leggo lo stato della macchina, se la macchina è spenta o non connessa faccio un nuovo ciclo
 			machine_data = self.find_machine_data(sleep_time)
 			if (not machine_data):
-				time.sleep(interval)
+				time.sleep(sleep_time)
 				# riprovo a connettermi al macchinario
 				self.connect()
 				continue
@@ -117,26 +99,27 @@ class Machine(Thread):
 			else:
 				print("\nnothing to do\n")
 
-			# in ogni caso, in ogni ciclo scrivo i dati del macchinario nella tabella di analisi
-			dati_analisi = machine_data.copy()
-			dati_analisi['an_idcommessa'] = commessa_attiva['co_id']
-			dati_analisi['an_idmacchinario'] = self.id
-			insert(self.db_conn, 'dati_siver', dati_analisi)
+			self.end_cycle(commessa_attiva,machine_data)
 
-			time.sleep(interval)
+			time.sleep(sleep_time)
 
 
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON CICLO
 #---------------------------------------------------------------------------------------------------------
-	def change_commessa_condition(self,commessa_attiva,machine_data):
-		return False
-
-
 	def close_commessa_condition(self,commessa_attiva,machine_data):
 		if machine_data and commessa_attiva:
 			return machine_data['an_qtaprodotta'] >= commessa_attiva['co_qtaDaProdurre']
 		return False
+
+
+	def end_cycle(self,commessa_attiva,machine_data):
+		''' Cosa deve fare la macchina alla terminazione di ogni ciclo'''
+		try:
+			_ = 1/0
+		except Exception as _:
+			print("Errore in end_cycle per ", self.id," - non implementato")
+			return False
 
 
 	def generate_internal_data(self,commessa_attiva=None):
@@ -153,7 +136,7 @@ class Machine(Thread):
 		return_data['an_dataInizio'] = commessa_attiva['co_dataInizio'].strftime("%Y-%m-%d %H:%M:%S")
 		data_fine = datetime.datetime.now(datetime.timezone.utc)
 		return_data['an_dataFine'] = data_fine.strftime("%Y-%m-%d %H:%M:%S")
-		return_data['an_qtaprodotta'] = commessa_attiva['co_qtaDaProdurre']
+		return_data['an_qtaprodotta'] = machine_data['an_qtaProdotta']
 		return_data['an_tempoEffettivo'] = (data_fine - commessa_attiva['co_dataInizio']).seconds * 1000 # tempo in millisecondi
 		return return_data
 
@@ -162,7 +145,6 @@ class Machine(Thread):
 		commessa_attiva = self.get_db_data()
 		if (not commessa_attiva):
 			print("nessuna commessa attiva per {}".format(self.id))
-			time.sleep(sleep_time)
 			return None
 		return commessa_attiva
 
@@ -172,106 +154,69 @@ class Machine(Thread):
 		if (not machine_data):
 			print("macchina {}: errore nell'estrazione dei dati".format(self.id))
 			self.connected = False
-			time.sleep(sleep_time)
-			return None
+			return {}
 		return machine_data
 
 
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON DATABASE
 #---------------------------------------------------------------------------------------------------------
-	def get_db_data(self, nome_tabella_config=""):
+	def get_db_data(self):
 		''' Legge lo stato della macchina
 		'''
 		try:
-			commesse = select(self.db_conn,nome_tabella_config,self.get_fields(nome_tabella_config),'co_flInviato=1 AND co_idmacchinario='+self.id).response
-			commessa_attiva = None
-			if (commesse and len(commesse) > 0): 
-				commessa_attiva = commesse[0]
-			return commessa_attiva
-		except Exception as e:
-			print("Errore in get_db_data per ", self.id," - ",e)
+			_ = 1/0
+		except Exception as _:
+			print("Errore in get_machine_data per ", self.id," - non implementato")
 			return False
 
 
-	def set_db_data(self, values, nome_tabella_scrittura_config="", nome_tabella_commesse_config=""):
+	def set_db_data(self, values):
 		''' Invio dati al macchinario
 		'''
 		try:
-			# salvo i dati di lavorazione
-			print(values)
-			insert(self.db_conn, nome_tabella_scrittura_config, values)
-
-			# aggiorno lo stato della commessa e la metto come terminata
-			result = update(self.db_conn,nome_tabella_commesse_config,'co_id='+str(values['an_idcommessa'])+' AND co_idmacchinario='+self.id,{'co_flInviato':2, 'co_qtaProdotta':values['an_qtaprodotta']})
-
-			return True
-		except Exception as e:
-			print("Errore in set_machine_data per ", self.id," - ",e)
+			_ = 1/0
+		except Exception as _:
+			print("Errore in get_machine_data per ", self.id," - non implementato")
 			return False
-				
-	
-	def get_fields(self, nome_tabella=None):
-		''' ciclo i filtri del config e li metto insieme con virgolette e ",", tolgo l'ultima virgola
-		'''
-		return ", ".join(self.config['fields'][nome_tabella].keys())
 
 
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON MACCHINA
 #---------------------------------------------------------------------------------------------------------
-	def get_machine_data(self, old_data=None, nome_tabella_config=""):
-		''' Legge lo stato della macchina
-		'''
-		if not old_data:
-			old_data = dict()
+	def read_variable(self,variable):
 		try:
-			if self.config['connection_type'] == 'snap7':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						old_data[field] = read(self.client,self.config['fields'][nome_tabella_config][field])
-			if self.config['connection_type'] == 'opc-ua':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						old_data[field] = self.client.get_node(self.config['fields'][nome_tabella_config][field]).get_value()
-			if self.config['connection_type'] == 'modbus':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						old_data[field] = read(self.client,self.config['fields'][nome_tabella_config][field])
-			return old_data
-		except Exception as e:
-			print("Errore in get_machine_data per ", self.id," - ",e)
+			_ = 1/0
+		except Exception as _:
+			print("Errore in read_variable per ", self.id," - non implementato")
 			return False
 
 
-	def set_machine_data(self, data, nome_tabella_config=""):
+	def write_variable(self,variable,value):
+		try:
+			_ = 1/0
+		except Exception as _:
+			print("Errore in write_variable per ", self.id," - non implementato")
+			return False
+
+	
+	def get_machine_data(self):
+		''' Legge lo stato della macchina
+		'''
+		try:
+			_ = 1/0
+		except Exception as _:
+			print("Errore in get_machine_data per ", self.id," - non implementato")
+			return False
+
+
+	def set_machine_data(self, data):
 		''' Invio dati al macchinario
 		'''
 		try:
-			if self.config['connection_type'] == 'snap7':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						write(self.client,self.config['fields'][nome_tabella_config][field],data[field])
-			if self.config['connection_type'] == 'opc-ua':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						node = self.client.get_node(self.config['fields'][nome_tabella_config][field])
-						data_type = node.get_data_type_as_variant_type()
-						node.set_value(ua_utils.string_to_variant(str(data[field]),data_type))
-			if self.config['connection_type'] == 'modbus':
-				for field in self.config['fields'][nome_tabella_config].keys():
-					# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-					if (self.config['fields'][nome_tabella_config][field]):
-						write(self.client,self.config['fields'][nome_tabella_config][field],data[field])
-
-			return True
-		except Exception as e:
-			print("Errore in set_machine_data per ", self.id," - ",e)
+			_ = 1/0
+		except Exception as _:
+			print("Errore in set_machine_data per ", self.id," - non implementato")
 			return False
 
 
@@ -280,64 +225,20 @@ class Machine(Thread):
 			Ritorna un handler per la connessione con il macchinario
 		'''
 		try:
-			if self.config['connection_type'] == 'snap7':
-				client = plc_connect(self.config['connection_config'])
-				if (client):	self.connected = True
-			if self.config['connection_type'] == 'modbus':
-				client = modbus_connect(self.config['connection_config'])
-				if (client):	self.connected = True
-			if self.config['connection_type'] == 'opc-ua':
-				client = Client(self.config['connection_config']['address'])
-				if (self.config['connection_config']['usr']):
-					client.set_user(self.config['connection_config']['usr'])
-				if (self.config['connection_config']['pwd']):
-					client.set_password(self.config['connection_config']['pwd'])
-				client.connect()
-			if self.config['connection_type'] == 'ethernet':
-				client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			if self.config['connection_type'] == 'file':
-				client = self.config['connection_config']['folder']
-			self.client = client
-		except TimeoutError:
-			print("TimeoutError")
+			_ = 1/0
+		except Exception as _:
+			print("Errore in connect per ", self.id," - non implementato")
 			return False
-		except ConnectionRefusedError as e:
-			print("ConnectionRefusedError:", e)
-			return False
-		except ConnectionResetError as e:
-			print("ConnectionResetError: ", e)
-			return False
-		except Exception as e:
-			print("Errore in connection_to_machine", e)
-		return True
 
 
 	def disconnect(self):
 		''' In base al protocollo specificato nel config del macchinario, disconnette la macchina
 		'''
 		try:
-			if self.config['connection_type'] == 'snap7':
-				plc_disconnect(self.client)
-			if self.config['connection_type'] == 'modbus':
-				modbus_disconnect(self.client)
-			if self.config['connection_type'] == 'opc-ua':
-				self.client.disconnect()
-			if self.config['connection_type'] == 'file':
-				# nothing to do
-				pass
-		except TimeoutError:
-			print("TimeoutError")
+			_ = 1/0
+		except Exception as _:
+			print("Errore in disconnect per ", self.id," - non implementato")
 			return False
-		except ConnectionRefusedError as e:
-			print("ConnectionRefusedError:", e)
-			return False
-		except ConnectionResetError as e:
-			print("ConnectionResetError: ", e)
-			return False
-		except Exception as e:
-			print("Errore in connection_to_machine", e)
-			return False
-		return True
 
 
 class Stati_Macchina(Enum):

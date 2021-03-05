@@ -1,8 +1,10 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-from ublib.Machine import Machine, Stati_Commessa, Stati_Macchina, ua_utils, read, write, select, update, insert, datetime
+from ublib.Machine import Machine, Stati_Commessa, Stati_Macchina, datetime
 
+# per connessione con database
+from sql_connection import insert,update,select
 
 class Costumer_Machine(Machine):
 	''' Qui ci vanno tutte le personalizzazioni comuni a tutte le macchine del cliente, ad esempio 
@@ -11,40 +13,51 @@ class Costumer_Machine(Machine):
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON DB
 #---------------------------------------------------------------------------------------------------------
-	def get_db_data(self, nome_tabella_config=""):
+	def get_db_data(self):
 		''' Legge a db se ci sono delle commesse da avviare in macchina
 		'''
-		return super().get_db_data(nome_tabella_config)
+		try:
+			commesse = select(
+				self.db_conn,
+				self.config_commesse['table_name'],
+				','.join(self.config_commesse['table_fields'].keys()),
+				'co_flInviato=1 AND co_idmacchinario='+self.id
+				).response
+			commessa_attiva = None
+			if (commesse and len(commesse) > 0): 
+				commessa_attiva = commesse[0]
+			return commessa_attiva
+		except Exception as e:
+			print("Errore in get_db_data per ", self.id," - ",e)
+			return False
 
 
-	def set_db_data(self, values, nome_tabella_scrittura_config="", nome_tabella_commesse_config=""):
+	def set_db_data(self, values):
 		''' Invio dati al database
 		'''
-		return super().set_db_data(values, nome_tabella_scrittura_config, nome_tabella_commesse_config)
+		try:
+			# salvo i dati di lavorazione
+			insert(self.db_conn, self.config_analisi['table_name'], values)
+
+			# aggiorno lo stato della commessa e la metto come terminata
+			update(self.db_conn, self.config_commesse['table_name'],'co_id='+str(values['an_idcommessa'])+' AND co_idmacchinario='+self.id,{'co_flInviato':2, 'co_qtaProdotta':values['an_qtaprodotta']})
+
+			return True
+		except Exception as e:
+			print("Errore in set_machine_data per ", self.id," - ",e)
+			return False
 
 
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON CICLO
-#---------------------------------------------------------------------------------------------------------
-	def change_commessa_condition(self,commessa_attiva,machine_data):
-		''' Cambio commessa se me ne arriva una nuova da gestionale oppure quella attuale risulta terminata
-		'''
-		return super().change_commessa_condition(commessa_attiva,machine_data)
-	
-	def close_commessa_condition(self,commessa_attiva,machine_data):
-		''' verifico se la quantità da raggiungere è stata raggiunta
-		'''
-		return super().close_commessa_condition(commessa_attiva,machine_data)
-
-
-	def generate_internal_data(self,commessa_attiva=None):
-		''' ritorna un dizionario pronto per essere riempiti con i dati del ciclo
-		'''
-		return super().generate_internal_data(commessa_attiva)
-
-
-	def update_internal_data_before_save_to_db(self,commessa_attiva,machine_data):
-		''' aggiorna i dati del ciclo prima di salvarli a db
-		'''
-		# Personalizzazione macchina siver
-		return super().update_internal_data_before_save_to_db(commessa_attiva,machine_data)
+#---------------------------------------------------------------------------------------------------------	
+	def end_cycle(self,commessa_attiva,machine_data):
+		''' Cosa deve fare la macchina alla terminazione di ogni ciclo'''
+		try:
+			dati_analisi = machine_data.copy()
+			dati_analisi['an_idcommessa'] = commessa_attiva['co_id']
+			dati_analisi['an_idmacchinario'] = self.id
+			insert(self.db_conn, self.config_dati['table_name'], dati_analisi)
+		except Exception as _:
+			print("Errore in end_cycle per ", self.id," - ", e)
+			return False
