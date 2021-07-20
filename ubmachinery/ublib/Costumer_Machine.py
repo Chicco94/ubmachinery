@@ -4,7 +4,7 @@
 from ublib.Machine import Machine, Stati_Commessa, Stati_Macchina, datetime
 
 # per connessione con database
-from sql_connection import insert,update,select
+from ublib.sql_connection import insert,update,select
 
 class Costumer_Machine(Machine):
 	''' Qui ci vanno tutte le personalizzazioni comuni a tutte le macchine del cliente, ad esempio 

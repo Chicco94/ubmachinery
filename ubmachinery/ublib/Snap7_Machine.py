@@ -8,7 +8,7 @@ from ublib.Costumer_Machine import Costumer_Machine
 # per connessione snap7
 import snap7
 import snap7.client
-from snap7.snap7types import *
+from snap7.types import *
 from snap7.util import *
 import struct
 
