@@ -1,0 +1,10 @@
+lxml==4.6.3
+mysql-connector==2.2.9
+opcua==0.98.13
+pymodbus==2.5.2
+pyModbusTCP==0.1.10
+pyserial==3.5
+python-dateutil==2.8.2
+python-snap7==1.1
+pytz==2021.1
+six==1.16.0
