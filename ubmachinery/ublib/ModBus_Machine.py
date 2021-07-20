@@ -3,12 +3,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-from Costumer_Machine import Costumer_Machine
+from ublib.Costumer_Machine import Costumer_Machine
 
 # per connessione opc-ua
-from opcua import ua
-from opcua import Client
-from opcua.common import ua_utils
+from pyModbusTCP.client import ModbusClient
+from pymodbus.payload import BinaryPayloadDecoder # Per leggere
+from pymodbus.payload import BinaryPayloadBuilder # Per scrivere
 
 
 
@@ -20,7 +20,17 @@ class OpcUa_Machine(Costumer_Machine):
 #---------------------------------------------------------------------------------------------------------
 	def read_variable(self,variable):
 		try:
-			return self.client.get_node(variable).get_value()
+			registers = self.client.read_holding_registers(variable['address'],variable['length'])
+			decoder = BinaryPayloadDecoder.fromRegisters(registers)
+			if variable['datatype']=='float':
+				return decoder.decode_32bit_float()
+			if variable['datatype']=='int':
+				return registers[0]
+			if variable['datatype']=='boolean':
+				return int("{0:b}".format(registers[0])[variable['bit']])
+			if variable['datatype']=='string':
+				return decoder.decode_string(variable['length']*2).decode('utf-8').replace('\x00','')
+			raise Exception
 		except Exception as e:
 			print("Errore in read_variable per ", self.id," - ", e)
 			return False
@@ -28,42 +38,24 @@ class OpcUa_Machine(Costumer_Machine):
 
 	def write_variable(self,variable,value):
 		try:
-			node = self.client.get_node(variable)
-			data_type = node.get_data_type_as_variant_type()
-			node.set_value(ua_utils.string_to_variant(str(value),data_type))
-			return True
+			builder = BinaryPayloadBuilder()
+			if variable['datatype']=='float':
+				return False
+			if variable['datatype']=='int':
+				return self.client.write_multiple_registers(variable['address'],[value])
+			if variable['datatype']=='boolean':
+				return False
+			if variable['datatype']=='string':
+				# Pulisco il campo
+				builder.add_string('\x00'*variable['length']*2)
+				self.client.write_multiple_registers(variable['address'],builder.to_registers())
+				# Scrivo il valore richiesto
+				builder = BinaryPayloadBuilder()
+				builder.add_string(value)
+				return self.client.write_multiple_registers(variable['address'],builder.to_registers())
+			raise Exception
 		except Exception as e:
 			print("Errore in write_variable per ", self.id," - ", e)
-			return False
-
-
-	def get_machine_data(self, old_data=None, nome_tabella_config=""):
-		''' Legge lo stato della macchina
-		'''
-		if not old_data:
-			old_data = dict()
-		try:
-			for field in self.config_dati.keys():
-				# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-				if (self.config_dati[field]):
-					old_data[field] = self.read_variable(self.config_dati[field])
-			return old_data
-		except Exception as e:
-			print("Errore in get_machine_data per ", self.id," - ",e)
-			return False
-
-
-	def set_machine_data(self, data, nome_tabella_config=""):
-		''' Invio dati al macchinario
-		'''
-		try:
-			for field in self.config_commesse.keys():
-				# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
-				if (self.config_commesse[field]):
-					self.write_variable(self.config_commesse[field], data[field])
-			return True
-		except Exception as e:
-			print("Errore in set_machine_data per ", self.id," - ",e)
 			return False
 
 
@@ -72,13 +64,21 @@ class OpcUa_Machine(Costumer_Machine):
 			Ritorna un handler per la connessione con il macchinario
 		'''
 		try:
-			client = Client(self.config_connessione['address'])
-			if (self.config_connessione['usr']):
-				client.set_user(self.config_connessione['usr'])
-			if (self.config_connessione['pwd']):
-				client.set_password(self.config_connessione['pwd'])
-			client.connect()
-			self.client = client
+			address = self.config["address"]
+			port = self.config["port"]
+			unit_id = self.config["unit_id"]
+
+			self.client = ModbusClient()
+			self.client.host(address)
+			self.client.port(port)
+			self.client.unit_id(unit_id)
+			self.client.open()
+			if (self.client.is_open()):
+				print("Connessione con client stabilita")
+				return True
+			else:
+				print("Connessione non riuscita")
+			return False
 		except TimeoutError:
 			print("TimeoutError")
 			return False
@@ -90,14 +90,14 @@ class OpcUa_Machine(Costumer_Machine):
 			return False
 		except Exception as e:
 			print("Errore in connection_to_machine", e)
-		return True
 
 
 	def disconnect(self):
 		''' In base al protocollo specificato nel config del macchinario, disconnette la macchina
 		'''
 		try:
-			self.client.disconnect()
+			self.client.close()
+			return True
 		except TimeoutError:
 			print("TimeoutError")
 			return False
@@ -110,4 +110,3 @@ class OpcUa_Machine(Costumer_Machine):
 		except Exception as e:
 			print("Errore in connection_to_machine", e)
 			return False
-		return True

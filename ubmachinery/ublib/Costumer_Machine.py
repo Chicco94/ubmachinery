@@ -61,3 +61,35 @@ class Costumer_Machine(Machine):
 		except Exception as _:
 			print("Errore in end_cycle per ", self.id," - ", e)
 			return False
+
+#---------------------------------------------------------------------------------------------------------
+#								INTERAZIONI CON MACCHINA
+#---------------------------------------------------------------------------------------------------------	
+	def get_machine_data(self, old_data=None, nome_tabella_config=""):
+		''' Legge lo stato della macchina
+		'''
+		if not old_data:
+			old_data = dict()
+		try:
+			for field in self.config_dati.keys():
+				# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
+				if (self.config_dati[field]):
+					old_data[field] = self.read_variable(self.config_dati[field])
+			return old_data
+		except Exception as e:
+			print("Errore in get_machine_data per ", self.id," - ",e)
+			return False
+
+
+	def set_machine_data(self, data, nome_tabella_config=""):
+		''' Invio dati al macchinario
+		'''
+		try:
+			for field in self.config_commesse.keys():
+				# ci potrebbero essere dei valori che voglio tenere nel config ma che non voglio leggere dal macchinario
+				if (self.config_commesse[field]):
+					self.write_variable(self.config_commesse[field], data[field])
+			return True
+		except Exception as e:
+			print("Errore in set_machine_data per ", self.id," - ",e)
+			return False
