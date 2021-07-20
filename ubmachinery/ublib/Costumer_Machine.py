@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 from ublib.Machine import Machine, Stati_Commessa, Stati_Macchina, datetime
+from ublib.models.AnalisiMacchinario import AnalisiMacchinario
+from ublib.models.CommesseMacchinario import CommesseMacchinario
 
 # per connessione con database
 from ublib.sql_connection import insert,update,select
@@ -13,7 +15,7 @@ class Costumer_Machine(Machine):
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON DB
 #---------------------------------------------------------------------------------------------------------
-	def get_db_data(self):
+	def get_db_data(self) -> CommesseMacchinario:
 		''' Legge a db se ci sono delle commesse da avviare in macchina
 		'''
 		try:
@@ -32,7 +34,7 @@ class Costumer_Machine(Machine):
 			return False
 
 
-	def set_db_data(self, values):
+	def set_db_data(self, values:AnalisiMacchinario):
 		''' Invio dati al database
 		'''
 		try:
@@ -58,7 +60,7 @@ class Costumer_Machine(Machine):
 			dati_analisi['an_idcommessa'] = commessa_attiva['co_id']
 			dati_analisi['an_idmacchinario'] = self.id
 			insert(self.db_conn, self.config_dati['table_name'], dati_analisi)
-		except Exception as _:
+		except Exception as e:
 			print("Errore in end_cycle per ", self.id," - ", e)
 			return False
 

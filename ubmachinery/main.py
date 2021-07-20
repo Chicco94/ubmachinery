@@ -3,7 +3,7 @@
 
 from ublib.sql_connection import connect_to_db
 from ublib.OpcUa_Machine import OpcUa_Machine
-from config import prod_flag, prod_db_config, dev_db_config, config_siver
+from config import prod_flag, prod_db_config, dev_db_config
 
 
 if __name__=="__main__":

@@ -4,7 +4,9 @@
 # import generici
 import sys
 sys.path.insert(0, "..")
-import os
+from ublib.models.CommesseMacchinario import CommesseMacchinario
+from ublib.models.AnalisiMacchinario import AnalisiMacchinario
+from ublib.models.DatiMacchinario import DatiMacchinario
 from enum import Enum
 from threading import Thread
 import datetime 
@@ -42,8 +44,8 @@ class Machine(Thread):
 		self.disconnect()
 
 	def cycle(self, stop=False, sleep_time = 5):
-		commessa_attiva = {'co_id':None}
-		machine_data = {}
+		commessa_attiva = CommesseMacchinario()
+		machine_data = AnalisiMacchinario()
 		# ciclo finchè non mi viene detto di fermarmi
 		while (not stop):
 			
@@ -55,45 +57,45 @@ class Machine(Thread):
 				continue
 
 			# leggo lo stato della macchina, se la macchina è spenta o non connessa faccio un nuovo ciclo
-			machine_data = self.find_machine_data(sleep_time)
+			machine_data = self.find_machine_data()
 			if (not machine_data):
 				time.sleep(sleep_time)
 				# riprovo a connettermi al macchinario
 				self.connect()
 				continue
 
-			commessa_attuale = self.find_commessa_attiva(sleep_time)
+			commessa_attuale = self.find_commessa_attiva()
 
 			# se è presente una commessa, ma è quella già attiva, controllo che non sia terminata
-			if (commessa_attuale and commessa_attuale['co_id'] == commessa_attiva['co_id']):
+			if (commessa_attuale and commessa_attuale == commessa_attiva):
 				# se è terminata la salvo a db
 				if (self.close_commessa_condition(commessa_attiva,machine_data)):
 					print("la macchina ha finito di lavorare")
 					self.set_db_data(self.update_internal_data_before_save_to_db(commessa_attiva,machine_data))
-					commessa_attiva = {'co_id':None}
+					commessa_attiva = CommesseMacchinario()
 
 			# se è presente una commessa, ma non ce ne è una attiva, la imposto
-			elif (commessa_attuale and not commessa_attiva['co_id']):
+			elif (commessa_attuale and not commessa_attiva):
 				print("è arrivata una nuova commessa, non ne avevo di attive")
 				commessa_attiva = self.generate_internal_data(commessa_attuale)
 				self.set_machine_data(commessa_attiva)
-				print('commessa attiva:', commessa_attiva['co_commessa'])
-				print('articolo:', commessa_attiva['co_descrizioneArticolo'])
+				print('commessa attiva:', commessa_attiva.co_commessa)
+				print('articolo:', commessa_attiva.co_descrizioneArticolo)
 
 			# se è presente una commessa, ma è diversa da quella attiva, la cambio
-			elif (commessa_attuale and commessa_attuale['co_id'] != commessa_attiva['co_id']):
+			elif (commessa_attuale and commessa_attuale != commessa_attiva):
 				print("è arrivata una nuova commessa, ne avevo già una in canna")
 				self.set_db_data(self.update_internal_data_before_save_to_db(commessa_attiva,machine_data))
 				commessa_attiva = self.generate_internal_data(commessa_attuale)
-				print('commessa attiva:', commessa_attiva['co_commessa'])
-				print('articolo:', commessa_attiva['co_descrizioneArticolo'])
+				print('commessa attiva:', commessa_attiva.co_commessa)
+				print('articolo:', commessa_attiva.co_descrizioneArticolo)
 				self.set_machine_data(commessa_attiva)
 
 			# se non è presente una commessa, e ce ne era una attiva (chiusa quindi da app), la chiudo da qui
-			elif (not commessa_attuale and commessa_attiva['co_id']):
+			elif (not commessa_attuale and commessa_attiva):
 				print("la commessa è stata chiusa da app")
 				self.set_db_data(self.update_internal_data_before_save_to_db(commessa_attiva,machine_data))
-				commessa_attiva = {'co_id':None}
+				commessa_attiva = CommesseMacchinario()
 
 			# se non è presente una commessa, e non ce ne era una attiva, non faccio niente
 			else:
@@ -107,13 +109,13 @@ class Machine(Thread):
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON CICLO
 #---------------------------------------------------------------------------------------------------------
-	def close_commessa_condition(self,commessa_attiva,machine_data):
+	def close_commessa_condition(self,commessa_attiva:CommesseMacchinario,machine_data:AnalisiMacchinario):
 		if machine_data and commessa_attiva:
-			return machine_data['an_qtaprodotta'] >= commessa_attiva['co_qtaDaProdurre']
+			return machine_data.an_qtaProdotta >= commessa_attiva.co_qtaDaProdurre
 		return False
 
 
-	def end_cycle(self,commessa_attiva,machine_data):
+	def end_cycle(self,commessa_attiva:CommesseMacchinario,machine_data:AnalisiMacchinario):
 		''' Cosa deve fare la macchina alla terminazione di ogni ciclo'''
 		try:
 			_ = 1/0
@@ -122,26 +124,26 @@ class Machine(Thread):
 			return False
 
 
-	def generate_internal_data(self,commessa_attiva=None):
+	def generate_internal_data(self,commessa_attiva:CommesseMacchinario=None) -> CommesseMacchinario:
 		''' ritorna un dizionario pronto per essere riempiti con i dati del ciclo
 		'''
-		commessa_attiva['co_dataInizio'] = datetime.datetime.now(datetime.timezone.utc)
+		commessa_attiva.co_dataInizio = datetime.datetime.now(datetime.timezone.utc)
 		return commessa_attiva
 
 
-	def update_internal_data_before_save_to_db(self,commessa_attiva,machine_data):
-		return_data = {}
-		return_data['an_idcommessa'] = commessa_attiva['co_id']
-		return_data['an_idmacchinario'] = self.id
-		return_data['an_dataInizio'] = commessa_attiva['co_dataInizio'].strftime("%Y-%m-%d %H:%M:%S")
+	def update_internal_data_before_save_to_db(self,commessa_attiva:CommesseMacchinario,machine_data:AnalisiMacchinario) -> AnalisiMacchinario:
+		return_data = AnalisiMacchinario()
+		return_data.an_idcommessa = commessa_attiva.co_id
+		return_data.an_idmacchinario = self.id
+		return_data.an_dataInizio = commessa_attiva.co_dataInizio.strftime("%Y-%m-%d %H:%M:%S")
 		data_fine = datetime.datetime.now(datetime.timezone.utc)
-		return_data['an_dataFine'] = data_fine.strftime("%Y-%m-%d %H:%M:%S")
-		return_data['an_qtaprodotta'] = machine_data['an_qtaProdotta']
-		return_data['an_tempoEffettivo'] = (data_fine - commessa_attiva['co_dataInizio']).seconds * 1000 # tempo in millisecondi
+		return_data.an_dataFine = data_fine.strftime("%Y-%m-%d %H:%M:%S")
+		return_data.an_qtaProdotta = machine_data.an_qtaProdotta
+		return_data.an_tempoEffettivo = (data_fine - commessa_attiva.co_dataInizio).seconds * 1000 # tempo in millisecondi
 		return return_data
 
 
-	def find_commessa_attiva(self, sleep_time):
+	def find_commessa_attiva(self) -> CommesseMacchinario:
 		commessa_attiva = self.get_db_data()
 		if (not commessa_attiva):
 			print("nessuna commessa attiva per {}".format(self.id))
@@ -149,33 +151,35 @@ class Machine(Thread):
 		return commessa_attiva
 
 
-	def find_machine_data(self,sleep_time):
+	def find_machine_data(self) -> AnalisiMacchinario:
 		machine_data = self.get_machine_data()
 		if (not machine_data):
 			print("macchina {}: errore nell'estrazione dei dati".format(self.id))
 			self.connected = False
-			return {}
+			return None
 		return machine_data
 
 
 #---------------------------------------------------------------------------------------------------------
 #								INTERAZIONI CON DATABASE
 #---------------------------------------------------------------------------------------------------------
-	def get_db_data(self):
+	def get_db_data(self) -> CommesseMacchinario:
 		''' Legge lo stato della macchina
 		'''
 		try:
 			_ = 1/0
+			return CommesseMacchinario()
 		except Exception as _:
 			print("Errore in get_machine_data per ", self.id," - non implementato")
 			return False
 
 
-	def set_db_data(self, values):
+	def set_db_data(self, values:AnalisiMacchinario) -> bool:
 		''' Invio dati al macchinario
 		'''
 		try:
 			_ = 1/0
+			return True
 		except Exception as _:
 			print("Errore in get_machine_data per ", self.id," - non implementato")
 			return False
@@ -200,14 +204,14 @@ class Machine(Thread):
 			return False
 
 	
-	def get_machine_data(self):
+	def get_machine_data(self) -> AnalisiMacchinario:
 		''' Legge lo stato della macchina
 		'''
 		try:
 			_ = 1/0
 		except Exception as _:
 			print("Errore in get_machine_data per ", self.id," - non implementato")
-			return False
+			return None
 
 
 	def set_machine_data(self, data):
