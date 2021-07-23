@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+
 @dataclass(init=True)
 class CommesseMacchinario:
     co_id: int
